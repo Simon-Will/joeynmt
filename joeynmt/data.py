@@ -196,12 +196,20 @@ class MultiBatchIterator:
         for batches in zip(*self.iterators):
             logger.info('MultiBatchIterator i = %d', i)
             i += 1
-            merged_data = {
-                field: list(itertools.chain.from_iterable(
-                    getattr(batch, field) for batch in batches))
-                for field in batches[0].fields
-            }
+
+            merged_data = {}
+            for field in batches[0].fields:
+                data = []
+                length = 0
+                import pdb
+                for batch in batches:
+                    pdb.set_trace()
+                    batch_data = getattr(batch, field)
+                    field.data.extend(batch_data[0])
+                    length += batch_data[1]
+                merged_data[field] = (data, length)
             # TODO: Sort if dataset.sort_within_batch
+
             batch_size = sum(batch.batch_size for batch in batches)
             yield Batch.fromvars(batches[0].dataset, batch_size, **merged_data)
 
