@@ -193,7 +193,7 @@ class MultiBatchIterator:
 
     def __iter__(self):
         i = 0
-        for batches in zip(self.iterators):
+        for batches in zip(*self.iterators):
             logger.info('MultiBatchIterator i = %d', i)
             i += 1
             merged_data = {
