@@ -318,7 +318,7 @@ class TrainManager:
         :param train_data: training data
         :param valid_data: validation data
         """
-        train_iter = make_data_iter(train_data, train2_data,
+        train_iter = make_data_iter(train_data, dataset2=train2_data,
                                     batch_size=self.batch_size,
                                     batch_type=self.batch_type,
                                     dataset2_ratio=self.batch_train2_ratio,

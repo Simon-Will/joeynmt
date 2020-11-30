@@ -192,19 +192,23 @@ class MultiBatchIterator:
         self.iterators = iterators
 
     def __iter__(self):
+        i = 0
         for batches in zip(self.iterators):
+            logger.info('MultiBatchIterator i = %d', i)
+            i += 1
             merged_data = {
                 field: list(itertools.chain.from_iterable(
                     getattr(batch, field) for batch in batches))
                 for field in batches[0].fields
             }
+            # TODO: Sort if dataset.sort_within_batch
             batch_size = sum(batch.batch_size for batch in batches)
             yield Batch.fromvars(batches[0].dataset, batch_size, **merged_data)
 
 
 def make_data_iter(dataset: Dataset,
-                   dataset2: Dataset,
                    batch_size: int,
+                   dataset2: Dataset = None,
                    batch_type: str = "sentence",
                    dataset2_ratio: float = 0.5,
                    train: bool = False,
@@ -221,6 +225,7 @@ def make_data_iter(dataset: Dataset,
         (no effect if set to True for testing)
     :return: torchtext iterator
     """
+    assert 0 <= dataset2_ratio <= 1
 
     batch_size_fn = token_batch_size_fn if batch_type == "token" else None
 
@@ -249,7 +254,7 @@ def make_data_iter(dataset: Dataset,
             train=False, sort=False)
         if dataset2:
             data2_iter = data.BucketIterator(
-                repeat=False, dataset=dataset,
+                repeat=False, dataset=dataset2,
                 batch_size=batch2_size, batch_size_fn=batch_size_fn,
                 train=False, sort=False)
 
