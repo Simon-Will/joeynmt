@@ -48,7 +48,7 @@ def load_data(data_cfg: dict, datasets: list = None)\
         - trg_vocab: target vocabulary extracted from training data
     """
     if datasets is None:
-        datasets = ["train", "dev", "test"]
+        datasets = ["train", "train2", "dev", "dev2", "test"]
 
     # load data from files
     src_lang = data_cfg["src"]
