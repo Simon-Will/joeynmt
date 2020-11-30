@@ -186,15 +186,20 @@ def token_batch_size_fn(new, count, sofar):
     return max(src_elements, tgt_elements)
 
 
-def make_multi_batch_iterator(iterators: List[Iterator]):
-    for batches in zip(iterators):
-        merged_data = {
-            field: list(itertools.chain.from_iterable(
-                getattr(batch, field) for batch in batches))
-            for field in batches[0].fields
-        }
-        batch_size = sum(batch.batch_size for batch in batches)
-        yield Batch.fromvars(batches[0].dataset, batch_size, **merged_data)
+class MultiBatchIterator:
+
+    def __init__(self, iterators: List[Iterator]):
+        self.iterators = iterators
+
+    def __iter__(self):
+        for batches in zip(self.iterators):
+            merged_data = {
+                field: list(itertools.chain.from_iterable(
+                    getattr(batch, field) for batch in batches))
+                for field in batches[0].fields
+            }
+            batch_size = sum(batch.batch_size for batch in batches)
+            yield Batch.fromvars(batches[0].dataset, batch_size, **merged_data)
 
 
 def make_data_iter(dataset: Dataset,
@@ -248,7 +253,8 @@ def make_data_iter(dataset: Dataset,
                 batch_size=batch2_size, batch_size_fn=batch_size_fn,
                 train=False, sort=False)
 
-        data_iter = make_multi_batch_iterator([data_iter, data2_iter])
+    if dataset2:
+        data_iter = MultiBatchIterator([data_iter, data2_iter])
 
     return data_iter
 
