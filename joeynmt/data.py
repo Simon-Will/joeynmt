@@ -13,6 +13,7 @@ import logging
 from torchtext.datasets import TranslationDataset
 from torchtext import data
 from torchtext.data import Batch, Dataset, Iterator, Field
+import torch
 
 from joeynmt.constants import UNK_TOKEN, EOS_TOKEN, BOS_TOKEN, PAD_TOKEN
 from joeynmt.vocabulary import build_vocab, Vocabulary
@@ -199,16 +200,14 @@ class MultiBatchIterator:
 
             merged_data = {}
             for field in batches[0].fields:
-                data = []
-                length = 0
-                import pdb
+                tensors = []
+                lengths = []
                 for batch in batches:
-                    pdb.set_trace()
                     batch_data = getattr(batch, field)
-                    field.data.extend(batch_data[0])
-                    length += batch_data[1]
-                merged_data[field] = (data, length)
-            # TODO: Sort if dataset.sort_within_batch
+                    tensors.append(batch_data[0])
+                    lengths.append(batch_data[1])
+                merged_data[field] = (torch.cat(tensors, 0), torch.cat(lengths, 0))
+                # TODO: Sort if dataset.sort_within_batch
 
             batch_size = sum(batch.batch_size for batch in batches)
             yield Batch.fromvars(batches[0].dataset, batch_size, **merged_data)
