@@ -2,16 +2,17 @@
 """
 Data module
 """
+import itertools
 import sys
 import random
 import os
 import os.path
-from typing import Optional
+from typing import List, Optional
 import logging
 
 from torchtext.datasets import TranslationDataset
 from torchtext import data
-from torchtext.data import Dataset, Iterator, Field
+from torchtext.data import Batch, Dataset, Iterator, Field
 
 from joeynmt.constants import UNK_TOKEN, EOS_TOKEN, BOS_TOKEN, PAD_TOKEN
 from joeynmt.vocabulary import build_vocab, Vocabulary
@@ -20,7 +21,8 @@ logger = logging.getLogger(__name__)
 
 
 def load_data(data_cfg: dict, datasets: list = None)\
-        -> (Dataset, Dataset, Optional[Dataset], Vocabulary, Vocabulary):
+        -> (Dataset, Optional[Dataset], Dataset, Optional[Dataset],
+            Optional[Dataset], Vocabulary, Vocabulary):
     """
     Load train, dev and optionally test data as specified in configuration.
     Vocabularies are created from the training set with a limit of `voc_limit`
@@ -38,7 +40,9 @@ def load_data(data_cfg: dict, datasets: list = None)\
     :param datasets: list of dataset names to load
     :return:
         - train_data: training dataset
+        - train2_data: second training dataset if given, otherwise None
         - dev_data: development dataset
+        - dev2_data: second development dataset if given, otherwise None
         - test_data: testdata set if given, otherwise None
         - src_vocab: source vocabulary extracted from training data
         - trg_vocab: target vocabulary extracted from training data
@@ -50,7 +54,9 @@ def load_data(data_cfg: dict, datasets: list = None)\
     src_lang = data_cfg["src"]
     trg_lang = data_cfg["trg"]
     train_path = data_cfg.get("train", None)
+    train2_path = data_cfg.get("train2", None)
     dev_path = data_cfg.get("dev", None)
+    dev2_path = data_cfg.get("dev2", None)
     test_path = data_cfg.get("test", None)
 
     if train_path is None and dev_path is None and test_path is None:
@@ -95,6 +101,18 @@ def load_data(data_cfg: dict, datasets: list = None)\
                 random_state=random.getstate())
             train_data = keep
 
+    train2_data = None
+    if "train2" in datasets and train2_path is not None:
+        logger.info("loading training 2 data...")
+        train2_data = TranslationDataset(path=train2_path,
+                                         exts=("." + src_lang, "." + trg_lang),
+                                         fields=(src_field, trg_field),
+                                         filter_pred=
+                                         lambda x: len(vars(x)['src'])
+                                         <= max_sent_length
+                                         and len(vars(x)['trg'])
+                                         <= max_sent_length)
+
     src_max_size = data_cfg.get("src_voc_limit", sys.maxsize)
     src_min_freq = data_cfg.get("src_voc_min_freq", 1)
     trg_max_size = data_cfg.get("trg_voc_limit", sys.maxsize)
@@ -121,6 +139,13 @@ def load_data(data_cfg: dict, datasets: list = None)\
                                       exts=("." + src_lang, "." + trg_lang),
                                       fields=(src_field, trg_field))
 
+    dev2_data = None
+    if "dev2" in datasets and dev2_path is not None:
+        logger.info("loading dev 2 data...")
+        dev_data = TranslationDataset(path=dev2_path,
+                                      exts=("." + src_lang, "." + trg_lang),
+                                      fields=(src_field, trg_field))
+
     test_data = None
     if "test" in datasets and test_path is not None:
         logger.info("loading test data...")
@@ -136,7 +161,8 @@ def load_data(data_cfg: dict, datasets: list = None)\
     src_field.vocab = src_vocab
     trg_field.vocab = trg_vocab
     logger.info("data loaded.")
-    return train_data, dev_data, test_data, src_vocab, trg_vocab
+    return (train_data, train2_data, dev_data, dev2_data, test_data, src_vocab,
+            trg_vocab)
 
 
 # pylint: disable=global-at-module-level
@@ -160,9 +186,22 @@ def token_batch_size_fn(new, count, sofar):
     return max(src_elements, tgt_elements)
 
 
+def make_multi_batch_iterator(iterators: List[Iterator]):
+    for batches in zip(iterators):
+        merged_data = {
+            field: list(itertools.chain.from_iterable(
+                getattr(batch, field) for batch in batches))
+            for field in batches[0].fields
+        }
+        batch_size = sum(batch.batch_size for batch in batches)
+        yield Batch.fromvars(batches[0].dataset, batch_size, **merged_data)
+
+
 def make_data_iter(dataset: Dataset,
+                   dataset2: Dataset,
                    batch_size: int,
                    batch_type: str = "sentence",
+                   dataset2_ratio: float = 0.5,
                    train: bool = False,
                    shuffle: bool = False) -> Iterator:
     """
@@ -180,6 +219,10 @@ def make_data_iter(dataset: Dataset,
 
     batch_size_fn = token_batch_size_fn if batch_type == "token" else None
 
+    if dataset2:
+        batch2_size = round(dataset2_ratio * batch_size)
+        batch_size -= batch2_size
+
     if train:
         # optionally shuffle and sort during training
         data_iter = data.BucketIterator(
@@ -187,12 +230,25 @@ def make_data_iter(dataset: Dataset,
             batch_size=batch_size, batch_size_fn=batch_size_fn,
             train=True, sort_within_batch=True,
             sort_key=lambda x: len(x.src), shuffle=shuffle)
+        if dataset2:
+            data2_iter = data.BucketIterator(
+                repeat=False, sort=False, dataset=dataset2,
+                batch_size=batch2_size, batch_size_fn=batch_size_fn,
+                train=True, sort_within_batch=True,
+                sort_key=lambda x: len(x.src), shuffle=shuffle)
     else:
         # don't sort/shuffle for validation/inference
         data_iter = data.BucketIterator(
             repeat=False, dataset=dataset,
             batch_size=batch_size, batch_size_fn=batch_size_fn,
             train=False, sort=False)
+        if dataset2:
+            data2_iter = data.BucketIterator(
+                repeat=False, dataset=dataset,
+                batch_size=batch2_size, batch_size_fn=batch_size_fn,
+                train=False, sort=False)
+
+        data_iter = make_multi_batch_iterator([data_iter, data2_iter])
 
     return data_iter
 

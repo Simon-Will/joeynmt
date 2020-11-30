@@ -23,6 +23,7 @@ from torchtext.data import Dataset
 
 from joeynmt.model import build_model
 from joeynmt.batch import Batch
+
 from joeynmt.helpers import log_data_info, load_config, log_cfg, \
     store_attention_plots, load_checkpoint, make_model_dir, \
     make_logger, set_seed, symlink_update, ConfigurationError
@@ -155,6 +156,8 @@ class TrainManager:
         # per-device eval_batch_size = self.eval_batch_size // self.n_gpu
         self.eval_batch_type = train_config.get("eval_batch_type",
                                                 self.batch_type)
+
+        self.batch_train2_ratio = train_config.get("batch_train2_ratio", 0.5)
 
         self.batch_multiplier = train_config.get("batch_multiplier", 1)
 
@@ -306,7 +309,8 @@ class TrainManager:
     # pylint: disable=unnecessary-comprehension
     # pylint: disable=too-many-branches
     # pylint: disable=too-many-statements
-    def train_and_validate(self, train_data: Dataset, valid_data: Dataset) \
+    def train_and_validate(self, train_data: Dataset, valid_data: Dataset,
+                           train2_data: Dataset = None, valid2_data: Dataset = None) \
             -> None:
         """
         Train the model and validate it from time to time on the validation set.
@@ -314,9 +318,10 @@ class TrainManager:
         :param train_data: training data
         :param valid_data: validation data
         """
-        train_iter = make_data_iter(train_data,
+        train_iter = make_data_iter(train_data, train2_data,
                                     batch_size=self.batch_size,
                                     batch_type=self.batch_type,
+                                    dataset2_ratio=self.batch_train2_ratio,
                                     train=True, shuffle=self.shuffle)
 
         #################################################################
@@ -427,6 +432,10 @@ class TrainManager:
                     if self.stats.steps % self.validation_freq == 0:
                         valid_duration = self._validate(valid_data, epoch_no)
                         total_valid_duration += valid_duration
+                        if valid2_data:
+                            valid2_duration = self._validate(valid2_data, epoch_no,
+                                                            valid2=True)
+                            total_valid_duration += valid2_duration
 
                 if self.stats.stop:
                     break
@@ -495,7 +504,7 @@ class TrainManager:
 
         return norm_batch_loss.item()
 
-    def _validate(self, valid_data, epoch_no):
+    def _validate(self, valid_data, epoch_no, valid2=False):
         valid_start_time = time.time()
 
         valid_score, valid_loss, valid_ppl, valid_sources, \
@@ -517,35 +526,38 @@ class TrainManager:
                 n_gpu=self.n_gpu
             )
 
+        namespace = "valid2" if valid2 else "valid"
         self.tb_writer.add_scalar(
-            "valid/valid_loss", valid_loss, self.stats.steps)
+            namespace + "/valid_loss", valid_loss, self.stats.steps)
         self.tb_writer.add_scalar(
-            "valid/valid_score", valid_score, self.stats.steps)
+            namespace + "/valid_score", valid_score, self.stats.steps)
         self.tb_writer.add_scalar(
-            "valid/valid_ppl", valid_ppl, self.stats.steps)
+            namespace + "/valid_ppl", valid_ppl, self.stats.steps)
 
-        if self.early_stopping_metric == "loss":
-            ckpt_score = valid_loss
-        elif self.early_stopping_metric in ["ppl", "perplexity"]:
-            ckpt_score = valid_ppl
-        else:
-            ckpt_score = valid_score
+        if not valid2:
+            if self.early_stopping_metric == "loss":
+                ckpt_score = valid_loss
+            elif self.early_stopping_metric in ["ppl", "perplexity"]:
+                ckpt_score = valid_ppl
+            else:
+                ckpt_score = valid_score
 
-        new_best = False
-        if self.stats.is_best(ckpt_score):
-            self.stats.best_ckpt_score = ckpt_score
-            self.stats.best_ckpt_iter = self.stats.steps
-            logger.info('Hooray! New best validation result [%s]!',
-                        self.early_stopping_metric)
-            if self.ckpt_queue.maxsize > 0:
-                logger.info("Saving new checkpoint.")
-                new_best = True
-                self._save_checkpoint()
+            new_best = False
+            if self.stats.is_best(ckpt_score):
+                self.stats.best_ckpt_score = ckpt_score
+                self.stats.best_ckpt_iter = self.stats.steps
+                logger.info('Hooray! New best validation result [%s]!',
+                            self.early_stopping_metric)
+                if self.ckpt_queue.maxsize > 0:
+                    logger.info("Saving new checkpoint.")
+                    new_best = True
+                    self._save_checkpoint()
 
-        if self.scheduler is not None \
-                and self.scheduler_step_at == "validation":
-            self.scheduler.step(ckpt_score)
+            if self.scheduler is not None \
+                    and self.scheduler_step_at == "validation":
+                self.scheduler.step(ckpt_score)
 
+        valid_name = "valid2" if valid2 else "main"
         # append to validation report
         self._add_report(
             valid_score=valid_score, valid_loss=valid_loss,
@@ -562,14 +574,15 @@ class TrainManager:
 
         valid_duration = time.time() - valid_start_time
         logger.info(
-            'Validation result (greedy) at epoch %3d, '
+            'Validation %s result (greedy) at epoch %3d, '
             'step %8d: %s: %6.2f, loss: %8.4f, ppl: %8.4f, '
-            'duration: %.4fs', epoch_no + 1, self.stats.steps,
+            'duration: %.4fs',
+            valid_name, epoch_no + 1, self.stats.steps,
             self.eval_metric, valid_score, valid_loss,
             valid_ppl, valid_duration)
 
         # store validation set outputs
-        self._store_outputs(valid_hypotheses)
+        self._store_outputs(valid_hypotheses, valid2=valid2)
 
         # store attention plots for selected valid sentences
         if valid_attention_scores:
@@ -578,15 +591,16 @@ class TrainManager:
                 targets=valid_hypotheses_raw,
                 sources=[s for s in valid_data.src],
                 indices=self.log_valid_sents,
-                output_prefix="{}/att.{}".format(
-                    self.model_dir, self.stats.steps),
+                output_prefix="{}/att.{}{}".format(
+                    self.model_dir, self.stats.steps,
+                    ".valid2" if valid2 else ""),
                 tb_writer=self.tb_writer, steps=self.stats.steps)
 
         return valid_duration
 
     def _add_report(self, valid_score: float, valid_ppl: float,
                     valid_loss: float, eval_metric: str,
-                    new_best: bool = False) -> None:
+                    new_best: bool = False, name: str= "main") -> None:
         """
         Append a one-line report to validation logging file.
 
@@ -606,9 +620,9 @@ class TrainManager:
 
         with open(self.valid_report_file, 'a') as opened_file:
             opened_file.write(
-                "Steps: {}\tLoss: {:.5f}\tPPL: {:.5f}\t{}: {:.5f}\t"
+                "{}\tSteps: {}\tLoss: {:.5f}\tPPL: {:.5f}\t{}: {:.5f}\t"
                 "LR: {:.8f}\t{}\n".format(
-                    self.stats.steps, valid_loss, valid_ppl, eval_metric,
+                    name, self.stats.steps, valid_loss, valid_ppl, eval_metric,
                     valid_score, current_lr, "*" if new_best else ""))
 
     def _log_parameters_list(self) -> None:
@@ -657,14 +671,14 @@ class TrainManager:
             logger.info("\tReference:  %s", references[p])
             logger.info("\tHypothesis: %s", hypotheses[p])
 
-    def _store_outputs(self, hypotheses: List[str]) -> None:
+    def _store_outputs(self, hypotheses: List[str], valid2=False) -> None:
         """
         Write current validation outputs to file in `self.model_dir.`
 
         :param hypotheses: list of strings
         """
-        current_valid_output_file = "{}/{}.hyps".format(self.model_dir,
-                                                        self.stats.steps)
+        current_valid_output_file = "{}/{}{}.hyps".format(
+            self.model_dir, self.stats.steps, ".valid2" if valid2 else "")
         with open(current_valid_output_file, 'w') as opened_file:
             for hyp in hypotheses:
                 opened_file.write("{}\n".format(hyp))
@@ -714,8 +728,8 @@ def train(cfg_file: str) -> None:
     set_seed(seed=cfg["training"].get("random_seed", 42))
 
     # load the data
-    train_data, dev_data, test_data, src_vocab, trg_vocab = load_data(
-        data_cfg=cfg["data"])
+    (train_data, train2_data, dev_data, dev2_data, test_data, src_vocab,
+     trg_vocab) = load_data(data_cfg=cfg["data"])
 
     # build an encoder-decoder model
     model = build_model(cfg["model"], src_vocab=src_vocab, trg_vocab=trg_vocab)
@@ -741,7 +755,8 @@ def train(cfg_file: str) -> None:
     trg_vocab.to_file(trg_vocab_file)
 
     # train the model
-    trainer.train_and_validate(train_data=train_data, valid_data=dev_data)
+    trainer.train_and_validate(train_data=train_data, train2_data=train2_data,
+                               valid_data=dev_data, valid2_data=dev2_data)
 
     # predict with the best model on validation and test
     # (if test data is available)
