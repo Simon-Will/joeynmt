@@ -213,10 +213,11 @@ class MultiBatchIterator:
                         continue
                     size = tensor.size()
                     tensors[i] = torch.cat(
-                        tensor,
-                        torch.ones(size[0], max_len - size[1],
-                                   dtype=tensor.dtype)
-                        * field.vocab.stoi[field.pad_token]
+                        [tensor,
+                         torch.ones(size[0], max_len - size[1],
+                                    dtype=tensor.dtype)
+                         * field.vocab.stoi[field.pad_token]],
+                        1
                     )
                 merged_data[field_name] = (torch.cat(tensors, 0),
                                            torch.cat(lengths, 0))
