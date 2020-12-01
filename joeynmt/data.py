@@ -221,18 +221,27 @@ class MultiBatchIterator:
                     )
                 batch_data = torch.cat(tensors, 0)
                 lengths = torch.cat(lengths, 0)
-                if self.iterators[0].sort_within_batch:
-                    sorted_indices_and_lengths = sorted(
-                        zip(range(len(lengths)), lengths),
-                        key=lambda i_l: i_l[1],
-                        reverse=True
-                    )
-                    indices = torch.tensor([i_l[0] for i_l
-                                            in sorted_indices_and_lengths])
-                    lengths = torch.index_select(lengths, 0, indices)
-                    batch_data = torch.index_select(batch_data, 0, indices)
-
                 merged_data[field_name] = (batch_data, lengths)
+
+            if self.iterators[0].sort_within_batch:
+                src_lengths = merged_data['src'][1]
+                sorted_indices_and_lengths = sorted(
+                    zip(range(len(src_lengths)), src_lengths),
+                    key=lambda i_l: i_l[1],
+                    reverse=True
+                )
+                indices = torch.tensor([i_l[0] for i_l
+                                        in sorted_indices_and_lengths])
+
+                merged_data['src'] = (
+                    torch.index_select(merged_data['src'][0], 0, indices),
+                    torch.index_select(merged_data['src'][1], 0, indices),
+                )
+                merged_data['trg'] = (
+                    torch.index_select(merged_data['trg'][0], 0, indices),
+                    torch.index_select(merged_data['trg'][1], 0, indices),
+                )
+
 
             batch_size = sum(batch.batch_size for batch in batches)
             yield Batch.fromvars(batches[0].dataset, batch_size, **merged_data)
