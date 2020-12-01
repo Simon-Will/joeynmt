@@ -534,7 +534,9 @@ class TrainManager:
         self.tb_writer.add_scalar(
             namespace + "/valid_ppl", valid_ppl, self.stats.steps)
 
-        if not valid2:
+        if valid2:
+            new_best = False
+        else:
             if self.early_stopping_metric == "loss":
                 ckpt_score = valid_loss
             elif self.early_stopping_metric in ["ppl", "perplexity"]:
