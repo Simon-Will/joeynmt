@@ -310,8 +310,8 @@ class TrainManager:
     # pylint: disable=too-many-branches
     # pylint: disable=too-many-statements
     def train_and_validate(self, train_data: Dataset, valid_data: Dataset,
-                           train2_data: Dataset = None, valid2_data: Dataset = None) \
-            -> None:
+                           train2_data: Dataset = None,
+                           valid2_data: Dataset = None) -> None:
         """
         Train the model and validate it from time to time on the validation set.
 
@@ -433,8 +433,8 @@ class TrainManager:
                         valid_duration = self._validate(valid_data, epoch_no)
                         total_valid_duration += valid_duration
                         if valid2_data:
-                            valid2_duration = self._validate(valid2_data, epoch_no,
-                                                            valid2=True)
+                            valid2_duration = self._validate(
+                                valid2_data, epoch_no, valid2=True)
                             total_valid_duration += valid2_duration
 
                 if self.stats.stop:

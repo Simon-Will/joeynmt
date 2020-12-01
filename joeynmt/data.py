@@ -2,7 +2,6 @@
 """
 Data module
 """
-import itertools
 import sys
 import random
 import os
