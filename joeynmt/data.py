@@ -273,33 +273,42 @@ def make_data_iter(dataset: Dataset,
         batch2_size = round(dataset2_ratio * batch_size)
         batch_size -= batch2_size
 
+    data_iter = None
+    data2_iter = None
     if train:
         # optionally shuffle and sort during training
-        data_iter = data.BucketIterator(
-            repeat=False, sort=False, dataset=dataset,
-            batch_size=batch_size, batch_size_fn=batch_size_fn,
-            train=True, sort_within_batch=True,
-            sort_key=lambda x: len(x.src), shuffle=shuffle)
-        if dataset2:
-            data2_iter = data.BucketIterator(
-                repeat=False, sort=False, dataset=dataset2,
-                batch_size=batch2_size, batch_size_fn=batch_size_fn,
+        if batch_size > 0:
+            data_iter = data.BucketIterator(
+                repeat=False, sort=False, dataset=dataset,
+                batch_size=batch_size, batch_size_fn=batch_size_fn,
                 train=True, sort_within_batch=True,
                 sort_key=lambda x: len(x.src), shuffle=shuffle)
+        if dataset2:
+            if batch2_size > 0:
+                data2_iter = data.BucketIterator(
+                    repeat=False, sort=False, dataset=dataset2,
+                    batch_size=batch2_size, batch_size_fn=batch_size_fn,
+                    train=True, sort_within_batch=True,
+                    sort_key=lambda x: len(x.src), shuffle=shuffle)
     else:
         # don't sort/shuffle for validation/inference
-        data_iter = data.BucketIterator(
-            repeat=False, dataset=dataset,
-            batch_size=batch_size, batch_size_fn=batch_size_fn,
-            train=False, sort=False)
-        if dataset2:
-            data2_iter = data.BucketIterator(
-                repeat=False, dataset=dataset2,
-                batch_size=batch2_size, batch_size_fn=batch_size_fn,
+        if batch_size > 0:
+            data_iter = data.BucketIterator(
+                repeat=False, dataset=dataset,
+                batch_size=batch_size, batch_size_fn=batch_size_fn,
                 train=False, sort=False)
+        if dataset2:
+            if batch2_size > 0:
+                data2_iter = data.BucketIterator(
+                    repeat=False, dataset=dataset2,
+                    batch_size=batch2_size, batch_size_fn=batch_size_fn,
+                    train=False, sort=False)
 
-    if dataset2:
-        data_iter = MultiBatchIterator([data_iter, data2_iter])
+    if data2_iter:
+        if data_iter:
+            data_iter = MultiBatchIterator([data_iter, data2_iter])
+        else:
+            data_iter = data2_iter
 
     return data_iter
 
