@@ -193,20 +193,33 @@ class MultiBatchIterator:
         self.iterators = iterators
 
     def __iter__(self):
-        i = 0
         for batches in zip(*self.iterators):
-            logger.info('MultiBatchIterator i = %d', i)
-            i += 1
-
+            dataset = batches[0].dataset
             merged_data = {}
-            for field in batches[0].fields:
+            for field_name, field in dataset.fields.items():
                 tensors = []
                 lengths = []
                 for batch in batches:
-                    batch_data = getattr(batch, field)
+                    batch_data = getattr(batch, field_name)
                     tensors.append(batch_data[0])
                     lengths.append(batch_data[1])
-                merged_data[field] = (torch.cat(tensors, 0), torch.cat(lengths, 0))
+                tensor_lengths = [t.size()[1] for t in tensors]
+                idx_of_longest, max_len = max(
+                    zip(range(len(tensors)), tensor_lengths),
+                    key=lambda idx_and_length: idx_and_length[1]
+                )
+                for i, tensor in enumerate(tensors):
+                    if i == idx_of_longest:
+                        continue
+                    size = tensor.size()
+                    tensors[i] = torch.cat(
+                        tensor,
+                        torch.ones(size[0], max_len - size[1],
+                                   dtype=tensor.dtype)
+                        * field.vocab.stoi[field.pad_token]
+                    )
+                merged_data[field_name] = (torch.cat(tensors, 0),
+                                           torch.cat(lengths, 0))
                 # TODO: Sort if dataset.sort_within_batch
 
             batch_size = sum(batch.batch_size for batch in batches)
