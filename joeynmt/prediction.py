@@ -280,13 +280,15 @@ def test(cfg_file,
 
     # load the data
     if datasets is None:
-        _, dev_data, test_data, src_vocab, trg_vocab = load_data(
-            data_cfg=cfg["data"], datasets=["dev", "test"])
-        data_to_predict = {"dev": dev_data, "test": test_data}
+        (_, _, dev_data, dev2_data, test_data, src_vocab,
+         trg_vocab) = load_data(data_cfg=cfg["data"],
+                                datasets=["dev", "dev2", "test"])
+        data_to_predict = {"dev": dev_data, "dev2": dev2_data,
+                           "test": test_data}
     else:   # avoid to load data again
-        data_to_predict = {"dev": datasets["dev"], "test": datasets["test"]}
-        src_vocab = datasets["src_vocab"]
-        trg_vocab = datasets["trg_vocab"]
+        src_vocab = datasets.pop("src_vocab")
+        trg_vocab = datasets.pop("trg_vocab")
+        data_to_predict = datasets
 
     # parse test args
     batch_size, batch_type, use_cuda, n_gpu, level, eval_metric, \

@@ -765,7 +765,7 @@ def train(cfg_file: str) -> None:
     ckpt = "{}/{}.ckpt".format(model_dir, trainer.stats.best_ckpt_iter)
     output_name = "{:08d}.hyps".format(trainer.stats.best_ckpt_iter)
     output_path = os.path.join(model_dir, output_name)
-    datasets_to_test = {"dev": dev_data, "test": test_data,
+    datasets_to_test = {"dev": dev_data, "dev2": dev2_data, "test": test_data,
                         "src_vocab": src_vocab, "trg_vocab": trg_vocab}
     test(cfg_file, ckpt=ckpt, output_path=output_path,
          datasets=datasets_to_test)
