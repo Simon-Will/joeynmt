@@ -564,7 +564,7 @@ class TrainManager:
         self._add_report(
             valid_score=valid_score, valid_loss=valid_loss,
             valid_ppl=valid_ppl, eval_metric=self.eval_metric,
-            new_best=new_best)
+            new_best=new_best, name=valid_name)
 
         self._log_examples(
             sources_raw=[v for v in valid_sources_raw],
@@ -602,7 +602,7 @@ class TrainManager:
 
     def _add_report(self, valid_score: float, valid_ppl: float,
                     valid_loss: float, eval_metric: str,
-                    new_best: bool = False, name: str= "main") -> None:
+                    new_best: bool = False, name: str = "main") -> None:
         """
         Append a one-line report to validation logging file.
 

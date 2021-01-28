@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 # coding: utf-8
 import matplotlib
 matplotlib.use('Agg')
@@ -6,10 +7,12 @@ import matplotlib.pyplot as plt
 from matplotlib.backends.backend_pdf import PdfPages
 
 import argparse
+import sys
+
 import numpy as np
 
 
-def read_vfiles(vfiles):
+def read_vfiles(vfiles, dataset_name=None):
     """
     Parse validation report files
     :param vfiles: list of files
@@ -23,9 +26,11 @@ def read_vfiles(vfiles):
             steps = {}
             for line in validf:
                 entries = line.strip().split()
-                key = int(entries[1])
+                if dataset_name is not None and entries[0] != dataset_name:
+                    continue
+                key = int(entries[2])
                 steps[key] = {}
-                for i in range(2, len(entries)-1, 2):
+                for i in range(3, len(entries)-1, 2):
                     name = entries[i].strip(":")
                     value = float(entries[i+1])
                     steps[key][name] = value
@@ -84,10 +89,20 @@ if __name__ == "__main__":
                         help="Value(s) to plot. Default: bleu")
     parser.add_argument("--output_path", type=str, default="plot.pdf",
                         help="Plot will be stored in this location.")
+    parser.add_argument("--dataset_name", type=str,
+                        help="Name of the dataset to plot"
+                        " (first column of validations.txt)")
     args = parser.parse_args()
 
     vfiles = [m+"/validations.txt" for m in args.model_dirs]
 
-    models = read_vfiles(vfiles)
+    models = read_vfiles(vfiles, dataset_name=args.dataset_name)
+    do_exit = False
+    for model, data in models.items():
+        if not data:
+            print('No data found for model {}.'.format(model))
+            do_exit = True
+    if do_exit:
+        sys.exit(1)
 
     plot_models(models, args.plot_values, args.output_path)
