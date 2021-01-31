@@ -20,6 +20,7 @@ from joeynmt.batch import Batch
 from joeynmt.data import load_data, make_data_iter, MonoDataset
 from joeynmt.constants import UNK_TOKEN, PAD_TOKEN, EOS_TOKEN
 from joeynmt.vocabulary import Vocabulary
+from joeynmt.logit_adjuster import build_logit_adjuster
 
 logger = logging.getLogger(__name__)
 
@@ -35,7 +36,8 @@ def validate_on_data(model: Model, data: Dataset,
                      batch_type: str = "sentence",
                      postprocess: bool = True,
                      bpe_type: str = "subword-nmt",
-                     sacrebleu: dict = None) \
+                     sacrebleu: dict = None,
+                     adjust_logits = None) \
         -> (float, float, float, List[str], List[List[str]], List[str],
             List[str], List[List[str]], List[np.array]):
     """
@@ -118,7 +120,8 @@ def validate_on_data(model: Model, data: Dataset,
             # run as during inference to produce translations
             output, attention_scores = run_batch(
                 model=model, batch=batch, beam_size=beam_size,
-                beam_alpha=beam_alpha, max_output_length=max_output_length)
+                beam_alpha=beam_alpha, max_output_length=max_output_length,
+                adjust_logits=adjust_logits)
 
             # sort outputs back to original order
             all_outputs.extend(output[sort_reverse_index])
@@ -227,6 +230,7 @@ def parse_test_args(cfg, mode="test"):
                 .get("remove_whitespace", True)
             sacrebleu["tokenize"] = cfg["testing"]["sacrebleu"] \
                 .get("tokenize", "13a")
+        tag_dict_file = cfg["testing"].get("tag_dict")
 
     else:
         beam_size = 1
@@ -234,6 +238,7 @@ def parse_test_args(cfg, mode="test"):
         postprocess = True
         bpe_type = "subword-nmt"
         sacrebleu = {"remove_whitespace": True, "tokenize": "13a"}
+        tag_dict_file = None
 
     decoding_description = "Greedy decoding" if beam_size < 2 else \
         "Beam search decoding with beam size = {} and alpha = {}". \
@@ -244,7 +249,7 @@ def parse_test_args(cfg, mode="test"):
     return batch_size, batch_type, use_cuda, n_gpu, level, \
            eval_metric, max_output_length, beam_size, beam_alpha, \
            postprocess, bpe_type, sacrebleu, decoding_description, \
-           tokenizer_info
+           tokenizer_info, tag_dict_file
 
 
 # pylint: disable-msg=logging-too-many-args
@@ -293,8 +298,8 @@ def test(cfg_file,
     # parse test args
     batch_size, batch_type, use_cuda, n_gpu, level, eval_metric, \
         max_output_length, beam_size, beam_alpha, postprocess, \
-        bpe_type, sacrebleu, decoding_description, tokenizer_info \
-        = parse_test_args(cfg, mode="test")
+        bpe_type, sacrebleu, decoding_description, tokenizer_info, \
+        tag_dict_file = parse_test_args(cfg, mode="test")
 
     # load model state from disk
     model_checkpoint = load_checkpoint(ckpt, use_cuda=use_cuda)
@@ -302,6 +307,9 @@ def test(cfg_file,
     # build model and load parameters into it
     model = build_model(cfg["model"], src_vocab=src_vocab, trg_vocab=trg_vocab)
     model.load_state_dict(model_checkpoint["model_state"])
+
+    # load tag dict and build logit adjuster
+    logit_adjuster = build_logit_adjuster(trg_vocab, tag_dict_file)
 
     if use_cuda:
         model.cuda()
@@ -325,7 +333,8 @@ def test(cfg_file,
             max_output_length=max_output_length, eval_metric=eval_metric,
             use_cuda=use_cuda, compute_loss=False, beam_size=beam_size,
             beam_alpha=beam_alpha, postprocess=postprocess,
-            bpe_type=bpe_type, sacrebleu=sacrebleu, n_gpu=n_gpu)
+            bpe_type=bpe_type, sacrebleu=sacrebleu, n_gpu=n_gpu,
+            adjust_logits=logit_adjuster)
         #pylint: enable=unused-variable
 
         if "trg" in data_set.fields:
@@ -403,7 +412,8 @@ def translate(cfg_file: str, ckpt: str, output_path: str = None) -> None:
             max_output_length=max_output_length, eval_metric="",
             use_cuda=use_cuda, compute_loss=False, beam_size=beam_size,
             beam_alpha=beam_alpha, postprocess=postprocess,
-            bpe_type=bpe_type, sacrebleu=sacrebleu, n_gpu=n_gpu)
+            bpe_type=bpe_type, sacrebleu=sacrebleu, n_gpu=n_gpu,
+            adjust_logits=logit_adjuster)
         return hypotheses
 
     cfg = load_config(cfg_file)
@@ -438,7 +448,8 @@ def translate(cfg_file: str, ckpt: str, output_path: str = None) -> None:
     # parse test args
     batch_size, batch_type, use_cuda, n_gpu, level, _, \
         max_output_length, beam_size, beam_alpha, postprocess, \
-        bpe_type, sacrebleu, _, _ = parse_test_args(cfg, mode="translate")
+        bpe_type, sacrebleu, _, _, tag_dict_file = parse_test_args(
+            cfg, mode="translate")
 
     # load model state from disk
     model_checkpoint = load_checkpoint(ckpt, use_cuda=use_cuda)
@@ -446,6 +457,9 @@ def translate(cfg_file: str, ckpt: str, output_path: str = None) -> None:
     # build model and load parameters into it
     model = build_model(cfg["model"], src_vocab=src_vocab, trg_vocab=trg_vocab)
     model.load_state_dict(model_checkpoint["model_state"])
+
+    # load tag dict and build logit adjuster
+    logit_adjuster = build_logit_adjuster(trg_vocab, tag_dict_file)
 
     if use_cuda:
         model.cuda()

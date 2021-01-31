@@ -140,6 +140,9 @@ class Vocabulary:
                                        skip_pad=skip_pad))
         return sentences
 
+    def sentence_to_array(self, sentence: List[str]) -> np.array:
+        return np.array([self.stoi[s] for s in sentence])
+
 
 def build_vocab(field: str, max_size: int, min_freq: int, dataset: Dataset,
                 vocab_file: str = None) -> Vocabulary:

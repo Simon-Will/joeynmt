@@ -13,8 +13,8 @@ __all__ = ["greedy", "transformer_greedy", "beam_search", "run_batch"]
 
 
 def greedy(src_mask: Tensor, max_output_length: int, model: Model,
-           encoder_output: Tensor, encoder_hidden: Tensor)\
-        -> (np.array, np.array):
+           encoder_output: Tensor, encoder_hidden: Tensor,
+           adjust_logits=None) -> (np.array, np.array):
     """
     Greedy decoding. Select the token word highest probability at each time
     step. This function is a wrapper that calls recurrent_greedy for
@@ -36,12 +36,14 @@ def greedy(src_mask: Tensor, max_output_length: int, model: Model,
         greedy_fun = recurrent_greedy
 
     return greedy_fun(
-        src_mask, max_output_length, model, encoder_output, encoder_hidden)
+        src_mask, max_output_length, model, encoder_output, encoder_hidden,
+        adjust_logits=None)
 
 
 def recurrent_greedy(
         src_mask: Tensor, max_output_length: int, model: Model,
-        encoder_output: Tensor, encoder_hidden: Tensor) -> (np.array, np.array):
+        encoder_output: Tensor, encoder_hidden: Tensor,
+        adjust_logits=None) -> (np.array, np.array):
     """
     Greedy decoding: in each step, choose the word that gets highest score.
     Version for recurrent decoder.
@@ -81,6 +83,9 @@ def recurrent_greedy(
                 att_vector=prev_att_vector)
             # logits: batch x time=1 x vocab (logits)
 
+        if adjust_logits:
+            logits = adjust_logits(np.stack(output, axis=1), logits)
+
         # greedy decoding: choose arg max over vocabulary in each step
         next_word = torch.argmax(logits, dim=-1)  # batch x time=1
         output.append(next_word.squeeze(1).detach().cpu().numpy())
@@ -103,7 +108,8 @@ def recurrent_greedy(
 # pylint: disable=unused-argument
 def transformer_greedy(
         src_mask: Tensor, max_output_length: int, model: Model,
-        encoder_output: Tensor, encoder_hidden: Tensor) -> (np.array, None):
+        encoder_output: Tensor, encoder_hidden: Tensor,
+        _unused=None) -> (np.array, None):
     """
     Special greedy function for transformer, since it works differently.
     The transformer remembers all previous states and attends to them.
@@ -166,7 +172,8 @@ def transformer_greedy(
 def beam_search(model: Model, size: int,
                 encoder_output: Tensor, encoder_hidden: Tensor,
                 src_mask: Tensor, max_output_length: int,
-                alpha: float, n_best: int = 1) -> (np.array, np.array):
+                alpha: float, n_best: int = 1,
+                adjust_logits=None) -> (np.array, np.array):
     """
     Beam search with size k.
     Inspired by OpenNMT-py, adapted for Transformer.
@@ -287,6 +294,9 @@ def beam_search(model: Model, size: int,
         if transformer:
             logits = logits[:, -1]  # keep only the last time step
             hidden = None           # we don't need to keep it for transformer
+
+        if adjust_logits:
+            logits = adjust_logits(alive_seq, logits)
 
         # batch*k x trg_vocab
         log_probs = F.log_softmax(logits, dim=-1).squeeze(1)
@@ -413,7 +423,8 @@ def beam_search(model: Model, size: int,
 
 
 def run_batch(model: Model, batch: Batch, max_output_length: int,
-              beam_size: int, beam_alpha: float) -> (np.array, np.array):
+              beam_size: int, beam_alpha: float,
+              adjust_logits=None) -> (np.array, np.array):
     """
     Get outputs and attentions scores for a given batch
 
@@ -442,7 +453,9 @@ def run_batch(model: Model, batch: Batch, max_output_length: int,
             max_output_length=max_output_length,
             model=model,
             encoder_output=encoder_output,
-            encoder_hidden=encoder_hidden)
+            encoder_hidden=encoder_hidden,
+            adjust_logits=adjust_logits
+        )
         # batch, time, max_src_length
     else:  # beam search
         stacked_output, stacked_attention_scores = beam_search(
@@ -452,6 +465,7 @@ def run_batch(model: Model, batch: Batch, max_output_length: int,
             encoder_hidden=encoder_hidden,
             src_mask=batch.src_mask,
             max_output_length=max_output_length,
-            alpha=beam_alpha)
+            alpha=beam_alpha,
+            adjust_logits=adjust_logits)
 
     return stacked_output, stacked_attention_scores
