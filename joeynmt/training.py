@@ -5,6 +5,7 @@ Training module
 """
 
 import argparse
+import glob
 import time
 import shutil
 from typing import List
@@ -232,15 +233,17 @@ class TrainManager:
             'amp_state': amp.state_dict() if self.fp16 else None
         }
         torch.save(state, model_path)
-        if self.ckpt_queue.full():
-            to_delete = self.ckpt_queue.get()  # delete oldest ckpt
-            try:
-                os.remove(to_delete)
-            except FileNotFoundError:
-                logger.warning("Wanted to delete old checkpoint %s but "
-                               "file does not exist.", to_delete)
 
-        self.ckpt_queue.put(model_path)
+        ckpt_paths = glob.glob('{}/*.ckpt'.format(self.model_dir))
+        if len(ckpt_paths) > self.ckpt_queue.maxsize:
+            ordered_ckpt_paths = sorted(ckpt_paths, key=os.path.getctime)
+            for path in ordered_ckpt_paths[:-5]:
+                try:
+                    logger.info('Deleting checkpoint %s', path)
+                    os.remove(path)
+                except FileNotFoundError:
+                    logger.warning("Wanted to delete old checkpoint %s but "
+                                   "file does not exist.", path)
 
         best_path = "{}/best.ckpt".format(self.model_dir)
         try:
