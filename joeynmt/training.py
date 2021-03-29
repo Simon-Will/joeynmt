@@ -8,7 +8,7 @@ import argparse
 import glob
 import time
 import shutil
-from typing import List
+from typing import List, Optional
 import logging
 import os
 import sys
@@ -206,7 +206,7 @@ class TrainManager:
         if self.n_gpu > 1:
             self.model = _DataParallel(self.model)
 
-    def _save_checkpoint(self) -> None:
+    def _save_checkpoint(self, saver: Optional[str] = None) -> None:
         """
         Save the model's current parameters and the training state to a
         checkpoint.
@@ -234,6 +234,12 @@ class TrainManager:
         }
         torch.save(state, model_path)
 
+        if saver:
+            saver_path = os.path.join(self.model_dir,
+                                      '{}.saver'.format(self.stats.steps))
+            with open(saver_path, 'w') as f:
+                f.write(saver)
+
         ckpt_paths = glob.glob('{}/*.ckpt'.format(self.model_dir))
         if len(ckpt_paths) > self.ckpt_queue.maxsize:
             ordered_ckpt_paths = sorted(ckpt_paths, key=os.path.getctime)
@@ -252,11 +258,16 @@ class TrainManager:
         except OSError:
             # overwrite best.ckpt
             torch.save(state, best_path)
+            if saver:
+                best_saver_path = os.path.join(self.model_dir, 'best.saver')
+                with open(best_saver_path, 'w') as f:
+                    f.write(saver)
 
     def init_from_checkpoint(self, path: str,
                              reset_best_ckpt: bool = False,
                              reset_scheduler: bool = False,
-                             reset_optimizer: bool = False) -> None:
+                             reset_optimizer: bool = False,
+                             resetter: str = 'joeynmt') -> None:
         """
         Initialize the trainer from a given checkpoint file.
 
